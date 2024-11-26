@@ -4,9 +4,9 @@ require('dotenv').config();
 // Database configuration
 const pool = new Pool({
     user: 'postgres',
-    host: 'localhost',
-    database: 'sekolahglr',
-    password: 'sayaikan',
+    host: '',
+    database: '',
+    password: '',
     port: 5432,
     // Add these options for better error handling
     connectionTimeoutMillis: 5000,
