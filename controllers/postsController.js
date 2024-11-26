@@ -339,6 +339,162 @@ const testEndpoint = async (req, res) => {
     res.json({ message: 'Posts API is working!' });
 };
 
+// Get likes count for a post
+const getLikesCount = async (req, res) => {
+    try {
+        const { postId } = req.params;
+        const { rows } = await pool.query(
+            'SELECT COUNT(*) as likes_count FROM post_likes WHERE post_id = $1',
+            [postId]
+        );
+        res.json({ likes_count: parseInt(rows[0].likes_count) });
+    } catch (error) {
+        console.error('Error getting likes count:', error);
+        res.status(500).json({ message: 'Error getting likes count' });
+    }
+};
+
+// Add like to a post
+const addLike = async (req, res) => {
+    try {
+        const { postId } = req.params;
+        const ipAddress = req.ip || req.connection.remoteAddress;
+
+        await pool.query(
+            'INSERT INTO post_likes (post_id, ip_address) VALUES ($1, $2) ON CONFLICT (post_id, ip_address) DO NOTHING',
+            [postId, ipAddress]
+        );
+
+        const { rows } = await pool.query(
+            'SELECT COUNT(*) as likes_count FROM post_likes WHERE post_id = $1',
+            [postId]
+        );
+
+        res.json({ likes_count: parseInt(rows[0].likes_count) });
+    } catch (error) {
+        console.error('Error handling like:', error);
+        res.status(500).json({ message: 'Error processing like' });
+    }
+};
+
+// Add comment to a post
+const addComment = async (req, res) => {
+    try {
+        const { postId } = req.params;
+        const { commenterName, commentText } = req.body;
+        const ipAddress = req.ip || req.connection.remoteAddress;
+
+        // Check comment count for this IP on this post
+        const { rows: commentCount } = await pool.query(
+            'SELECT COUNT(*) as count FROM post_comments WHERE post_id = $1 AND ip_address = $2',
+            [postId, ipAddress]
+        );
+
+        if (parseInt(commentCount[0].count) >= 3) {
+            return res.status(403).json({ 
+                message: 'Kamu telah mencapai batas komentar untuk postingan ini (3 komentar per postingan)'
+            });
+        }
+
+        const result = await pool.query(
+            'INSERT INTO post_comments (post_id, ip_address, commenter_name, comment_text) VALUES ($1, $2, $3, $4) RETURNING *',
+            [postId, ipAddress, commenterName, commentText]
+        );
+
+        res.json(result.rows[0]);
+    } catch (error) {
+        console.error('Error adding comment:', error);
+        res.status(500).json({ message: 'Error adding comment' });
+    }
+};
+
+// Get comments for a post
+const getComments = async (req, res) => {
+    try {
+        const { postId } = req.params;
+        const { rows } = await pool.query(
+            'SELECT * FROM post_comments WHERE post_id = $1 ORDER BY created_at DESC',
+            [postId]
+        );
+        res.json(rows);
+    } catch (error) {
+        console.error('Error fetching comments:', error);
+        res.status(500).json({ message: 'Error fetching comments' });
+    }
+};
+
+// Check if user has liked a post
+const hasUserLiked = async (req, res) => {
+    try {
+        const { postId } = req.params;
+        const ipAddress = req.ip || req.connection.remoteAddress;
+
+        const { rows } = await pool.query(
+            'SELECT EXISTS(SELECT 1 FROM post_likes WHERE post_id = $1 AND ip_address = $2) as has_liked',
+            [postId, ipAddress]
+        );
+
+        res.json({ hasLiked: rows[0].has_liked });
+    } catch (error) {
+        console.error('Error checking like status:', error);
+        res.status(500).json({ message: 'Error checking like status' });
+    }
+};
+
+// Add this method to remove a like
+const removeLike = async (req, res) => {
+    try {
+        const { postId } = req.params;
+        const ipAddress = req.ip || req.connection.remoteAddress;
+
+        await pool.query(
+            'DELETE FROM post_likes WHERE post_id = $1 AND ip_address = $2',
+            [postId, ipAddress]
+        );
+
+        const { rows } = await pool.query(
+            'SELECT COUNT(*) as likes_count FROM post_likes WHERE post_id = $1',
+            [postId]
+        );
+
+        res.json({ likes_count: parseInt(rows[0].likes_count) });
+    } catch (error) {
+        console.error('Error removing like:', error);
+        res.status(500).json({ message: 'Error removing like' });
+    }
+};
+
+// Add this new method
+const getAllComments = async (req, res) => {
+    try {
+        const { rows } = await pool.query(`
+            SELECT pc.*, p.judul as post_title 
+            FROM post_comments pc
+            JOIN posts p ON pc.post_id = p.id
+            ORDER BY pc.created_at DESC
+        `);
+        res.json(rows);
+    } catch (error) {
+        console.error('Error fetching all comments:', error);
+        res.status(500).json({ message: 'Error fetching comments' });
+    }
+};
+
+// Add this method
+const deleteComment = async (req, res) => {
+    try {
+        const { commentId } = req.params;
+        await pool.query(
+            'DELETE FROM post_comments WHERE id = $1',
+            [commentId]
+        );
+        res.json({ message: 'Comment deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting comment:', error);
+        res.status(500).json({ message: 'Error deleting comment' });
+    }
+};
+
 const postsController = {
     getWebPosts,
     getAdminPosts,
@@ -348,6 +504,14 @@ const postsController = {
     updatePost,
     deletePost,
     testEndpoint,
+    getLikesCount,
+    addLike,
+    addComment,
+    getComments,
+    hasUserLiked,
+    removeLike,
+    getAllComments,
+    deleteComment
 };
 
 module.exports = postsController; 
