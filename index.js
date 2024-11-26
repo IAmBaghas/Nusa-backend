@@ -14,16 +14,13 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Add specific static middleware for profile images
 app.use('/uploads/profiles', (req, res, next) => {
-    const userId = req.path.split('/')[1]; // Get user ID from path
-    const userProfileDir = path.join(__dirname, 'uploads', 'profiles', userId);
-    
-    console.log('Serving profile image:', {
-        requestPath: req.path,
-        userId: userId,
-        fullPath: userProfileDir
+    // Log the request for debugging
+    console.log('Profile image request:', {
+        originalUrl: req.originalUrl,
+        path: req.path
     });
     
-    express.static(userProfileDir)(req, res, next);
+    express.static(path.join(__dirname, 'uploads', 'profiles'))(req, res, next);
 });
 
 // Import routes
@@ -100,6 +97,26 @@ app.get('/test-image/*', (req, res) => {
     }
 });
 
+// Add this endpoint to test profile image paths
+app.get('/test-profile-image/:id', (req, res) => {
+    const profileId = req.params.id;
+    const profileDir = path.join(__dirname, 'uploads', 'profiles', profileId);
+    
+    if (fs.existsSync(profileDir)) {
+        const files = fs.readdirSync(profileDir);
+        res.json({
+            exists: true,
+            directory: profileDir,
+            files: files
+        });
+    } else {
+        res.status(404).json({
+            exists: false,
+            directory: profileDir
+        });
+    }
+});
+
 // Add this before your routes
 app.get('/', (req, res) => {
     res.json({ message: 'Server is running!' });
@@ -124,7 +141,11 @@ const ensureDirectories = () => {
     const dirs = [
         path.join(__dirname, 'uploads'),
         path.join(__dirname, 'uploads', 'profiles'),
-        path.join(__dirname, 'uploads', 'postSiswa')
+        path.join(__dirname, 'uploads', 'postSiswa'),
+        path.join(__dirname, 'uploads', 'banner'),
+        path.join(__dirname, 'uploads', 'about'),
+        path.join(__dirname, 'uploads', 'logo'),
+        path.join(__dirname, 'uploads', 'header')
     ];
     
     dirs.forEach(dir => {
@@ -135,5 +156,22 @@ const ensureDirectories = () => {
     });
 };
 
+// Add this function to check profile images on server start
+const checkProfileImages = () => {
+    const profilesDir = path.join(__dirname, 'uploads', 'profiles');
+    if (fs.existsSync(profilesDir)) {
+        console.log('Checking profile images directory:', profilesDir);
+        const profiles = fs.readdirSync(profilesDir);
+        profiles.forEach(profileId => {
+            const profileDir = path.join(profilesDir, profileId);
+            if (fs.statSync(profileDir).isDirectory()) {
+                const images = fs.readdirSync(profileDir);
+                console.log(`Profile ${profileId} images:`, images);
+            }
+        });
+    }
+};
+
 // Call it when the server starts
 ensureDirectories();
+checkProfileImages();

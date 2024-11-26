@@ -1,17 +1,9 @@
 const pool = require('../config/database');
 const path = require('path');
+const fs = require('fs');
 
-// Get all student posts with details
 const getAllPosts = async (req, res) => {
     try {
-        // Verify admin access
-        if (req.user?.type !== 'web_admin') {
-            return res.status(403).json({
-                success: false,
-                message: 'Admin access required'
-            });
-        }
-
         const result = await pool.query(`
             WITH post_images AS (
                 SELECT 
@@ -28,15 +20,10 @@ const getAllPosts = async (req, res) => {
                 GROUP BY sg.siswapost_id
             )
             SELECT 
-                sp.id,
-                sp.caption,
-                sp.likes_count,
-                sp.created_at,
-                sp.updated_at,
-                sp.status,
-                p.id as profile_id,
+                sp.*,
                 p.username,
                 p.full_name,
+                p.id as profile_id,
                 p.profile_image,
                 COALESCE(pi.images, '[]'::json) as images,
                 CASE 
@@ -49,54 +36,26 @@ const getAllPosts = async (req, res) => {
             ORDER BY sp.created_at DESC
         `);
 
-        // Process posts to include proper image paths
-        const processedPosts = result.rows.map(post => {
-            try {
-                return {
-                    ...post,
-                    // Handle profile image path
-                    profile_image: post.profile_image ? 
-                        `http://localhost:5000/uploads/profiles/${post.profile_id}/${post.profile_image.split('/').pop()}` : 
-                        null,
-                    // Handle post images paths
-                    images: post.images.map(img => {
-                        try {
-                            const filePath = img.file;
-                            const pathParts = filePath.split('/');
-                            const userId = pathParts[pathParts.indexOf('postSiswa') + 1];
-                            const dateFolder = pathParts[pathParts.indexOf('postSiswa') + 2];
-                            const fileName = path.basename(img.file);
-
-                            return {
-                                ...img,
-                                file: `http://localhost:5000/uploads/postSiswa/${userId}/${dateFolder}/${fileName}`
-                            };
-                        } catch (err) {
-                            console.error('Error processing image path:', err);
-                            return {
-                                ...img,
-                                file: null
-                            };
-                        }
-                    }).filter(img => img.file) // Remove any images with invalid paths
-                };
-            } catch (err) {
-                console.error('Error processing post:', err);
-                return null;
-            }
-        }).filter(post => post !== null); // Remove any posts that failed to process
+        const processedPosts = result.rows.map(post => ({
+            ...post,
+            profile_image: post.profile_image,
+            images: post.images.map(img => ({
+                ...img,
+                file: `http://localhost:5000/uploads/${img.file}`
+            }))
+        }));
 
         res.json(processedPosts);
     } catch (error) {
         console.error('Error fetching student posts:', error);
         res.status(500).json({ 
             success: false,
-            message: 'Error fetching student posts' 
+            message: 'Error fetching student posts',
+            error: error.message 
         });
     }
 };
 
-// Update post status (archive/restore)
 const updatePostStatus = async (req, res) => {
     const client = await pool.connect();
     try {
@@ -105,13 +64,12 @@ const updatePostStatus = async (req, res) => {
         const { id } = req.params;
         const { status } = req.body;
 
-        // Update post status
         const result = await client.query(
             `UPDATE siswa_posts 
              SET status = $1,
                  updated_at = CURRENT_TIMESTAMP 
              WHERE id = $2 
-             RETURNING id, status`,
+             RETURNING *`,
             [status, id]
         );
 
@@ -134,7 +92,6 @@ const updatePostStatus = async (req, res) => {
     }
 };
 
-// Delete post permanently
 const deletePostPermanently = async (req, res) => {
     const client = await pool.connect();
     try {
@@ -142,35 +99,6 @@ const deletePostPermanently = async (req, res) => {
 
         const { id } = req.params;
 
-        // First, get the gallery ID
-        const galleryResult = await client.query(
-            'SELECT id FROM siswaglr WHERE siswapost_id = $1',
-            [id]
-        );
-
-        if (galleryResult.rows.length > 0) {
-            const galleryId = galleryResult.rows[0].id;
-
-            // Delete photos
-            await client.query(
-                'DELETE FROM foto_siswa WHERE siswaglr_id = $1',
-                [galleryId]
-            );
-
-            // Delete gallery
-            await client.query(
-                'DELETE FROM siswaglr WHERE id = $1',
-                [galleryId]
-            );
-        }
-
-        // Delete likes
-        await client.query(
-            'DELETE FROM siswa_post_likes WHERE siswapost_id = $1',
-            [id]
-        );
-
-        // Finally delete the post
         const result = await client.query(
             'DELETE FROM siswa_posts WHERE id = $1 RETURNING id',
             [id]

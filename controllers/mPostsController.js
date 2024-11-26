@@ -82,7 +82,6 @@ const getMobilePosts = async (req, res) => {
 // Get latest posts for mobile
 const getLatestPosts = async (req, res) => {
     try {
-        console.log('Fetching latest posts for mobile');
         const result = await pool.query(`
             WITH post_galleries AS (
                 SELECT 
@@ -133,7 +132,6 @@ const getLatestPosts = async (req, res) => {
             LIMIT 3
         `);
 
-        console.log('Raw query result:', result.rows);
 
         const processedPosts = result.rows.map(post => ({
             id: post.id,
@@ -151,7 +149,6 @@ const getLatestPosts = async (req, res) => {
             gallery_images: post.gallery_images.map(img => img.file)
         }));
 
-        console.log('Processed posts:', processedPosts);
         res.json(processedPosts);
     } catch (error) {
         console.error('Error fetching latest posts:', error);

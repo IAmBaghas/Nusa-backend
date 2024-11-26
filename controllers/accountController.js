@@ -1,249 +1,141 @@
 const pool = require('../config/database');
 const bcrypt = require('bcrypt');
+const path = require('path');
+const fs = require('fs');
 
-// Get all profiles
 const getProfiles = async (req, res) => {
     try {
-        const result = await pool.query(`
-            SELECT 
-                id, 
-                username, 
-                full_name, 
-                email, 
-                profile_image,
-                last_login,
-                created_at,
-                updated_at,
-                main_page,
-                status
-            FROM profile 
-            ORDER BY id ASC
-        `);
-
-        // Process profile images to include proper paths
+        const result = await pool.query('SELECT * FROM profile ORDER BY id ASC');
+        
+        // Map the results to include proper profile image paths
         const profiles = result.rows.map(profile => ({
             ...profile,
-            profile_image: profile.profile_image ? 
-                `http://localhost:5000/uploads/profiles/${profile.id}/${profile.profile_image.split('/').pop()}` : 
-                null
+            profile_image: profile.profile_image ? `profiles/${profile.id}/${profile.profile_image}` : null
         }));
 
         res.json(profiles);
     } catch (error) {
-        console.error('Error fetching profiles:', error);
-        res.status(500).json({ message: 'Error fetching profiles' });
+        console.error('Error getting profiles:', error);
+        res.status(500).json({ message: 'Server error' });
     }
 };
 
-// Create new profile
 const createProfile = async (req, res) => {
     try {
         const { username, full_name, email } = req.body;
+        const defaultPassword = 'sekolah!123';
+        const hashedPassword = await bcrypt.hash(defaultPassword, 10);
 
-        // Validate input
-        if (!username || !full_name || !email) {
-            return res.status(400).json({ message: 'All fields are required' });
-        }
-
-        // Check if username already exists
-        const existingUser = await pool.query(
-            'SELECT id FROM profile WHERE username = $1',
-            [username]
-        );
-
-        if (existingUser.rows.length > 0) {
-            return res.status(400).json({ message: 'Username already exists' });
-        }
-
-        // Check if email already exists
-        const existingEmail = await pool.query(
-            'SELECT id FROM profile WHERE email = $1',
-            [email]
-        );
-
-        if (existingEmail.rows.length > 0) {
-            return res.status(400).json({ message: 'Email already exists' });
-        }
-
-        // Create new profile with default values
         const result = await pool.query(
-            `INSERT INTO profile (
-                username, 
-                password, 
-                full_name, 
-                email, 
-                profile_image,
-                is_first_login,
-                main_page,
-                status
-            ) 
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
-            RETURNING id, username, full_name, email`,
-            [
-                username,
-                'sekolah!123',  // default password
-                full_name,
-                email,
-                null,           // default profile_image
-                true,          // default is_first_login
-                false,         // default main_page
-                true           // default status
-            ]
+            'INSERT INTO profile (username, password, full_name, email) VALUES ($1, $2, $3, $4) RETURNING *',
+            [username, hashedPassword, full_name, email]
         );
 
-        res.status(201).json({
-            status: 'success',
-            message: 'Profile created successfully',
-            data: result.rows[0]
-        });
+        // Return the new profile with proper image path
+        const newProfile = {
+            ...result.rows[0],
+            profile_image: result.rows[0].profile_image ? 
+                `http://localhost:5000/uploads/profiles/${result.rows[0].id}/${result.rows[0].profile_image}` : 
+                null
+        };
+
+        res.json(newProfile);
     } catch (error) {
         console.error('Error creating profile:', error);
-        res.status(500).json({ 
-            message: error.message || 'Error creating profile' 
-        });
+        res.status(500).json({ message: 'Server error' });
     }
 };
 
-// Update profile
 const updateProfile = async (req, res) => {
     try {
         const { id } = req.params;
         const { username, full_name, email } = req.body;
 
-        // Validate input
-        if (!username || !full_name || !email) {
-            return res.status(400).json({ message: 'All fields are required' });
-        }
-
-        // Check if username is taken by another user
-        const existingUser = await pool.query(
-            'SELECT id FROM profile WHERE username = $1 AND id != $2',
-            [username, id]
-        );
-
-        if (existingUser.rows.length > 0) {
-            return res.status(400).json({ message: 'Username already exists' });
-        }
-
-        // Update profile
         const result = await pool.query(
-            `UPDATE profile 
-             SET username = $1, full_name = $2, email = $3, updated_at = CURRENT_TIMESTAMP 
-             WHERE id = $4 
-             RETURNING id, username, full_name, email, updated_at`,
+            'UPDATE profile SET username = $1, full_name = $2, email = $3 WHERE id = $4 RETURNING *',
             [username, full_name, email, id]
         );
 
-        if (result.rows.length === 0) {
-            return res.status(404).json({ message: 'Profile not found' });
-        }
+        // Return updated profile with proper image path
+        const updatedProfile = {
+            ...result.rows[0],
+            profile_image: result.rows[0].profile_image ? 
+                `http://localhost:5000/uploads/profiles/${id}/${result.rows[0].profile_image}` : 
+                null
+        };
 
-        res.json({
-            status: 'success',
-            message: 'Profile updated successfully',
-            data: result.rows[0]
-        });
+        res.json(updatedProfile);
     } catch (error) {
         console.error('Error updating profile:', error);
-        res.status(500).json({ message: 'Error updating profile' });
+        res.status(500).json({ message: 'Server error' });
     }
 };
 
-// Reset password
 const resetPassword = async (req, res) => {
     try {
         const { id } = req.params;
         const defaultPassword = 'sekolah!123';
+        const hashedPassword = await bcrypt.hash(defaultPassword, 10);
 
-        // Update password and set first login flag
-        const result = await pool.query(
-            `UPDATE profile 
-             SET password = $1, 
-                 is_first_login = true, 
-                 updated_at = CURRENT_TIMESTAMP 
-             WHERE id = $2 
-             RETURNING id, username, full_name`,
-            [defaultPassword, id]
+        await pool.query(
+            'UPDATE profile SET password = $1 WHERE id = $2',
+            [hashedPassword, id]
         );
 
-        if (result.rows.length === 0) {
-            return res.status(404).json({ message: 'Profile not found' });
-        }
-
-        res.json({
-            status: 'success',
-            message: `Password reset successfully for ${result.rows[0].full_name}`,
-            data: {
-                id: result.rows[0].id,
-                username: result.rows[0].username
-            }
-        });
+        res.json({ message: 'Password reset successful' });
     } catch (error) {
         console.error('Error resetting password:', error);
-        res.status(500).json({ message: 'Error resetting password' });
+        res.status(500).json({ message: 'Server error' });
     }
 };
 
-// Add new toggle handlers
-const toggleMainPage = async (req, res) => {
+const updateMainPage = async (req, res) => {
     try {
         const { id } = req.params;
         const { main_page } = req.body;
 
-        console.log('Toggling main_page:', { id, main_page }); // Debug log
-
         const result = await pool.query(
-            `UPDATE profile 
-             SET main_page = $1,
-                 updated_at = CURRENT_TIMESTAMP 
-             WHERE id = $2 
-             RETURNING id, main_page`,
+            'UPDATE profile SET main_page = $1 WHERE id = $2 RETURNING *',
             [main_page, id]
         );
 
-        if (result.rows.length === 0) {
-            return res.status(404).json({ message: 'Profile not found' });
-        }
+        // Return updated profile with proper image path
+        const updatedProfile = {
+            ...result.rows[0],
+            profile_image: result.rows[0].profile_image ? 
+                `http://localhost:5000/uploads/profiles/${id}/${result.rows[0].profile_image}` : 
+                null
+        };
 
-        res.json({
-            status: 'success',
-            message: 'Main page status updated successfully',
-            data: result.rows[0]
-        });
+        res.json(updatedProfile);
     } catch (error) {
         console.error('Error updating main page status:', error);
-        res.status(500).json({ message: 'Error updating main page status' });
+        res.status(500).json({ message: 'Server error' });
     }
 };
 
-const toggleStatus = async (req, res) => {
+const updateStatus = async (req, res) => {
     try {
         const { id } = req.params;
         const { status } = req.body;
 
-        console.log('Toggling status:', { id, status }); // Debug log
-
         const result = await pool.query(
-            `UPDATE profile 
-             SET status = $1,
-                 updated_at = CURRENT_TIMESTAMP 
-             WHERE id = $2 
-             RETURNING id, status`,
+            'UPDATE profile SET status = $1 WHERE id = $2 RETURNING *',
             [status, id]
         );
 
-        if (result.rows.length === 0) {
-            return res.status(404).json({ message: 'Profile not found' });
-        }
+        // Return updated profile with proper image path
+        const updatedProfile = {
+            ...result.rows[0],
+            profile_image: result.rows[0].profile_image ? 
+                `http://localhost:5000/uploads/profiles/${id}/${result.rows[0].profile_image}` : 
+                null
+        };
 
-        res.json({
-            status: 'success',
-            message: 'Status updated successfully',
-            data: result.rows[0]
-        });
+        res.json(updatedProfile);
     } catch (error) {
         console.error('Error updating status:', error);
-        res.status(500).json({ message: 'Error updating status' });
+        res.status(500).json({ message: 'Server error' });
     }
 };
 
@@ -252,6 +144,6 @@ module.exports = {
     createProfile,
     updateProfile,
     resetPassword,
-    toggleMainPage,
-    toggleStatus
+    updateMainPage,
+    updateStatus
 }; 
